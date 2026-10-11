@@ -5,6 +5,8 @@ EcoMap is a pixel-art map of two real micro-environments in Pune. Players walk a
 - **College campus.** Rooftop solar on two buildings, routing a computer lab's e-waste, and replacing a parking lane with an EV bus stop.
 - **Omkareshwar Temple.** A Ganeshotsav immersion-day scene on the Mutha ghats. Players sort Nirmalya offerings with SWaCH waste pickers, set up a collection kalash, and switch flower stalls off plastic.
 
+**Live:** https://main.d3344s1eczb14i.amplifyapp.com
+
 ![Campus map](ui-mockups/03-campus-map.png)
 
 ## Architecture
@@ -83,6 +85,16 @@ Requirements: Node.js 20 or newer, and an AWS account where the IAM user has Adm
    ```
    For local development, run `npm run dev` instead.
 
+### Tests
+
+| Command | What it checks |
+|---|---|
+| `npm test` | Scoring rules in the shared catalog |
+| `npx dotenv -e .env -- node scripts/smoke-test.mjs` | Every API route against the deployed backend, using a throwaway Cognito user |
+| `npx dotenv -e .env -- node scripts/ui-check.mjs <site-url> <screenshot-dir>` | The live site in headless Chrome: sign in, name, campus choice, leaderboard, temple sort |
+
+Both AWS scripts delete their test user and its data when they finish.
+
 ## Project layout
 
 ```
@@ -91,7 +103,7 @@ shared/             Hotspot catalog and scoring rules used by both sides
 src/auth/           Pixel-styled sign in, sign up, verification and reset
 src/game/           Tile maps, canvas renderer, movement
 src/ui/             Impact display, leaderboard, hotspot modal, sorting game
-scripts/            Amplify Hosting deploy script
+scripts/            Amplify Hosting deploy script, API smoke test, browser check
 ui-mockups/         Screenshots of every screen
 ```
 

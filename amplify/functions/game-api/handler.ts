@@ -99,7 +99,8 @@ async function submitAction(userId: string, body: Record<string, unknown>) {
   const result = scoreAction(body);
   await ensurePlayer(userId);
 
-  const names: Record<string, string> = { '#h': result.hotspotId };
+  // "metrics" is a DynamoDB reserved word, so it is always referenced through #metrics.
+  const names: Record<string, string> = { '#h': result.hotspotId, '#metrics': 'metrics' };
   const values: Record<string, unknown> = {
     ':pts': result.points,
     ':now': new Date().toISOString(),
@@ -110,7 +111,7 @@ async function submitAction(userId: string, body: Record<string, unknown>) {
   Object.entries(result.delta).forEach(([key, amount], i) => {
     names[`#m${i}`] = key;
     values[`:d${i}`] = amount;
-    sets.push(`metrics.#m${i} = if_not_exists(metrics.#m${i}, :zero) + :d${i}`);
+    sets.push(`#metrics.#m${i} = if_not_exists(#metrics.#m${i}, :zero) + :d${i}`);
   });
 
   try {
@@ -137,7 +138,8 @@ async function resetProgress(userId: string) {
   const res = await ddb.send(new UpdateCommand({
     TableName: TABLE,
     Key: { userId },
-    UpdateExpression: 'SET totalScore = :zero, completed = :empty, metrics = :empty, updatedAt = :now',
+    UpdateExpression: 'SET totalScore = :zero, completed = :empty, #metrics = :empty, updatedAt = :now',
+    ExpressionAttributeNames: { '#metrics': 'metrics' },
     ExpressionAttributeValues: { ':zero': 0, ':empty': {}, ':now': new Date().toISOString() },
     ReturnValues: 'ALL_NEW',
   }));
