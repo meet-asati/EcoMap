@@ -1,0 +1,47 @@
+{
+  "name": "ecomap",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit -p tsconfig.app.json && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p amplify/tsconfig.json",
+    "test": "tsx --test shared/*.test.ts",
+    "aws:bootstrap": "dotenv -e .env -- cdk bootstrap aws://552969575556/ap-south-1",
+    "deploy:backend": "dotenv -e .env -- ampx sandbox --once --identifier prod",
+    "deploy:web": "npm run build && dotenv -e .env -- node scripts/deploy-hosting.mjs",
+    "deploy": "npm run deploy:backend && npm run deploy:web"
+  },
+  "dependencies": {
+    "@fontsource/press-start-2p": "^5.3.0",
+    "@fontsource/vt323": "^5.3.0",
+    "aws-amplify": "^6.22.1",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@aws-amplify/backend": "^1.25.1",
+    "@aws-amplify/backend-cli": "^1.10.0",
+    "@aws-sdk/client-amplify": "^3.1149.0",
+    "@aws-sdk/client-dynamodb": "^3.1149.0",
+    "@aws-sdk/lib-dynamodb": "^3.1149.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/aws-lambda": "^8.10.164",
+    "@types/node": "^22.20.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "aws-cdk": "^2.1145.0",
+    "aws-cdk-lib": "^2.273.0",
+    "constructs": "^10.8.1",
+    "dotenv-cli": "^11.0.0",
+    "esbuild": "^0.28.2",
+    "fflate": "^0.8.3",
+    "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.4"
+  }
+}

@@ -1,0 +1,66 @@
+@import "tailwindcss";
+
+/* Arcade cabinet palette. Single dark theme by design. */
+@theme {
+  --color-bg: #0b1118;
+  --color-panel: #141c27;
+  --color-panel2: #1b2635;
+  --color-well: #0a0f16;
+  --color-line: #2f3f55;
+  --color-linehi: #5b739a;
+  --color-fg: #e8eef7;
+  --color-muted: #8ea0bb;
+  --color-leaf: #7ddc5a;
+  --color-leafdk: #3f9b33;
+  --color-gold: #ffd166;
+  --color-river: #4fb6d8;
+  --color-warn: #ff8a5b;
+  --color-bad: #ff5e6c;
+  --font-display: "Press Start 2P", ui-monospace, monospace;
+  --font-body: "VT323", "Courier New", ui-monospace, monospace;
+}
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-body);
+    font-size: 20px;
+    line-height: 1.25;
+    color-scheme: dark;
+  }
+  h1, h2, h3 { font-family: var(--font-display); font-weight: 400; line-height: 1.5; text-wrap: balance; margin: 0; }
+  button { font: inherit; color: inherit; cursor: pointer; }
+  button:disabled { cursor: default; opacity: .55; }
+  :focus-visible { outline: 3px solid var(--color-gold); outline-offset: 2px; }
+}
+
+@layer components {
+  .px-frame { box-shadow: 0 0 0 2px var(--color-line), 0 0 0 4px var(--color-bg), 0 0 0 6px var(--color-line); }
+  .px-stage { box-shadow: 0 0 0 2px var(--color-line), 0 0 0 4px var(--color-bg), 0 0 0 6px var(--color-linehi); }
+  .btn {
+    background: var(--color-panel2);
+    padding: 8px 14px;
+    box-shadow: 0 0 0 2px var(--color-line), inset 0 -3px 0 #0007;
+  }
+  .btn:not(:disabled):hover { background: #243247; }
+  .btn-primary { background: var(--color-leafdk); box-shadow: 0 0 0 2px var(--color-leaf), inset 0 -3px 0 #0006; }
+  .btn-primary:not(:disabled):hover { background: #4db33f; }
+  .btn-ghost { background: transparent; box-shadow: 0 0 0 2px var(--color-line); }
+  .btn-ghost:not(:disabled):hover { background: var(--color-panel2); }
+  .pill { font-size: 16px; padding: 2px 8px; background: var(--color-panel2); box-shadow: 0 0 0 2px var(--color-line); }
+  .field {
+    font-family: var(--font-body); font-size: 20px; color: var(--color-fg);
+    background: var(--color-well); border: 0; padding: 8px 10px; width: 100%; min-width: 0;
+    box-shadow: inset 0 0 0 2px var(--color-line);
+  }
+  .field:focus { outline: 0; box-shadow: inset 0 0 0 2px var(--color-leaf); }
+  .label-caps { font-family: var(--font-display); font-size: 10px; color: var(--color-muted); letter-spacing: .5px; text-transform: uppercase; }
+  .pixelated { image-rendering: pixelated; image-rendering: crisp-edges; }
+}
+
+@keyframes pop { from { transform: translateY(6px); opacity: 0; } to { transform: none; opacity: 1; } }
+.animate-pop { animation: pop .8s steps(6) both; }
+@media (prefers-reduced-motion: reduce) { .animate-pop { animation: none; } }
