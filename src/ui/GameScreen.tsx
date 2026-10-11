@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActionInput, Hotspot, ZoneId } from '../../shared/hotspots';
 import { api, errorMessage, type Leaderboard, type Profile } from '../api';
-import { MapCanvas } from '../game/MapCanvas';
+import { MapCanvas, type MapControls } from '../game/MapCanvas';
+import { TouchControls } from '../game/TouchControls';
 import { HotspotModal } from './HotspotModal';
 import { Hud } from './Hud';
 import { LeaderboardPanel } from './LeaderboardPanel';
@@ -20,6 +21,9 @@ export function GameScreen({ zone, profile, setProfile, onError }: {
   const [board, setBoard] = useState<Leaderboard | null>(null);
   const [boardError, setBoardError] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
+  const [near, setNear] = useState<Hotspot | null>(null);
+  const mapControls = useRef<MapControls>(null);
+  const paused = Boolean(open) || showSources;
   const completed = useMemo(() => new Set(Object.keys(profile.completed)), [profile.completed]);
 
   const refreshBoard = useCallback(async () => {
@@ -53,16 +57,18 @@ export function GameScreen({ zone, profile, setProfile, onError }: {
 
       <div className="grid gap-2">
         <div className="px-stage relative bg-[#06090d] p-2">
-          <MapCanvas zone={zone} completed={completed} paused={Boolean(open) || showSources} onOpen={setOpen} />
+          <MapCanvas ref={mapControls} zone={zone} completed={completed} paused={paused} onOpen={setOpen} onNear={setNear} />
           {zone === 'temple' && (
             <div className="absolute right-3 top-3 bg-[#5a2a7a] px-2 py-1.5 font-display text-[9px] text-[#ffd9f7] shadow-[0_0_0_2px_#c57bff]">
               GANESHOTSAV · VISARJAN DAY
             </div>
           )}
           <div className="absolute bottom-3 left-3 bg-[#000b] px-2 py-1 text-[16px] text-muted">
-            Arrow keys or WASD to walk · E to interact · or click a ! pip
+            <span className="pointer-coarse:hidden">Arrow keys or WASD to walk · E to interact · or click a ! pip</span>
+            <span className="hidden pointer-coarse:inline">Use the pad to walk · ACT or tap a ! pip</span>
           </div>
         </div>
+        <TouchControls controls={mapControls} near={near} disabled={paused} />
         <div className="flex justify-end">
           <button type="button" className="text-[17px] text-river underline" onClick={() => setShowSources(true)}>Sources and assumptions</button>
         </div>
