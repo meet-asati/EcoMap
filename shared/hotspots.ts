@@ -31,6 +31,11 @@ export interface Hotspot {
   facts: string[];
   kind: 'choice' | 'sort';
   choices?: Choice[];
+  /** "Why?" step: one right reason, the rest plausible but wrong. Choice hotspots only. */
+  reasons?: { id: string; text: string }[];
+  correctReason?: string;
+  /** "Predict the impact" step: guess the chosen option's change in one metric. */
+  predict?: { metric: MetricKey; question: string; min: number; max: number; step: number };
 }
 
 export interface SortItem {
@@ -43,6 +48,8 @@ export interface SortItem {
 export interface ActionInput {
   hotspotId: string;
   choiceId?: string;
+  reasonId?: string;
+  prediction?: number;
   placements?: Record<string, string>;
 }
 
@@ -55,7 +62,17 @@ export interface ActionResult {
   outcome: string;
   correct?: number;
   total?: number;
+  basePoints?: number;
+  reasonCorrect?: boolean;
+  multiplier?: number;
+  prediction?: number;
+  predictionActual?: number;
+  predictionHit?: boolean;
+  bonus?: number;
 }
+
+/** Rewards for thinking: the reason multiplies the base points, a close prediction adds a bonus. */
+export const THINK_RULES = { rightReason: 1.5, wrongReason: 0.5, predictBonus: 200, predictTolerance: 0.25, predictFloor: 0.05 };
 
 export class ScoringError extends Error {}
 
@@ -102,6 +119,13 @@ export const HOTSPOTS: Hotspot[] = [
       { id: 'none', label: 'Leave the roof empty', sub: 'Keep buying all power from the grid', points: 0,
         delta: {}, outcome: 'Nothing changes. The roof keeps baking in the sun.' },
     ],
+    reasons: [
+      { id: 'grid', text: 'Pune sun is strong enough that every usable m² of roof cuts grid power and its CO₂' },
+      { id: 'image', text: 'Panels on the roof look good in the college prospectus' },
+      { id: 'cooling', text: 'Panels shade the roof, and the cooler building is the main saving' },
+    ],
+    correctReason: 'grid',
+    predict: { metric: 'co2', question: 'How many kg of CO₂ will your choice prevent each year?', min: 0, max: 200000, step: 1000 },
   },
   {
     id: 'solar-admin', zone: 'campus', x: 28, y: 2, w: 8, h: 4, kind: 'choice',
@@ -115,6 +139,13 @@ export const HOTSPOTS: Hotspot[] = [
       { id: 'none', label: 'Leave the roof empty', sub: 'Keep buying all power from the grid', points: 0,
         delta: {}, outcome: 'Nothing changes.' },
     ],
+    reasons: [
+      { id: 'small', text: 'The admin block uses little power, so its roof does not matter' },
+      { id: 'tonnes', text: 'Even a smaller roof offsets tonnes of grid CO₂ every year' },
+      { id: 'parapet', text: 'A north-facing parapet makes solar pointless in Pune' },
+    ],
+    correctReason: 'tonnes',
+    predict: { metric: 'co2', question: 'How many kg of CO₂ will your choice prevent each year?', min: 0, max: 100000, step: 1000 },
   },
   {
     id: 'ewaste-lab', zone: 'campus', x: 16, y: 10, w: 6, h: 4, kind: 'choice',
@@ -134,6 +165,13 @@ export const HOTSPOTS: Hotspot[] = [
       { id: 'store', label: 'Pile it in the storeroom', sub: 'Deal with it next year', points: 0,
         delta: {}, outcome: 'The lab gets its space back. The problem does not go away.' },
     ],
+    reasons: [
+      { id: 'cash', text: 'It earns the college the most money for the old hardware' },
+      { id: 'inert', text: 'Old computers are harmless once they are switched off' },
+      { id: 'leach', text: 'Heavy metals need closed-system recovery, or they leach into soil and groundwater' },
+    ],
+    correctReason: 'leach',
+    predict: { metric: 'metals', question: 'How many kg of lead, mercury and cadmium will your choice keep out of soil and water?', min: 0, max: 100, step: 1 },
   },
   {
     id: 'ev-parking', zone: 'campus', x: 2, y: 10, w: 10, h: 3, kind: 'choice',
@@ -151,6 +189,13 @@ export const HOTSPOTS: Hotspot[] = [
       { id: 'more-parking', label: 'Add a second parking lane', sub: 'More cars, more idling', points: 0,
         delta: { co2: -6000 }, outcome: 'More parking invites more cars. Emissions go up by 6 tonnes a year.' },
     ],
+    reasons: [
+      { id: 'zero', text: 'Electric vehicles have zero emissions' },
+      { id: 'per-person', text: 'One e-bus emits far less per rider than 40 single-occupancy petrol cars, even on grid power' },
+      { id: 'stay-home', text: 'Less parking pushes people to skip coming to campus' },
+    ],
+    correctReason: 'per-person',
+    predict: { metric: 'co2', question: 'What is the net CO₂ your choice prevents each year? (Negative means more is emitted.)', min: -10000, max: 30000, step: 100 },
   },
   {
     id: 'nirmalya-ghat', zone: 'temple', x: 12, y: 14, w: 14, h: 3, kind: 'sort',
@@ -180,6 +225,13 @@ export const HOTSPOTS: Hotspot[] = [
       { id: 'none', label: 'No collection point', sub: 'Leave it to the river', points: 0,
         delta: {}, outcome: 'Offerings go into the river in their plastic bags.' },
     ],
+    reasons: [
+      { id: 'polite', text: 'Devotees will sort their offerings if they are asked politely' },
+      { id: 'landfill', text: 'Collected flowers can simply go to landfill, out of sight' },
+      { id: 'paid', text: 'Paid sorters at the point of disposal catch offerings before they reach the water' },
+    ],
+    correctReason: 'paid',
+    predict: { metric: 'compost', question: 'How many kg of compost will your choice produce today?', min: 0, max: 3000, step: 50 },
   },
   {
     id: 'vendors', zone: 'temple', x: 5, y: 9, w: 5, h: 5, kind: 'choice',
@@ -189,6 +241,7 @@ export const HOTSPOTS: Hotspot[] = [
     facts: [
       'About 6,000 bags a day leave these stalls on festival days',
       'Thin carry bags are banned in Maharashtra but still common',
+      'A thin carry bag weighs about 20 g',
     ],
     choices: [
       { id: 'cloth', label: 'Supply cloth bags and leaf plates to all stalls', sub: 'One-time kit, zero plastic', points: 600, sustainable: true,
@@ -196,6 +249,13 @@ export const HOTSPOTS: Hotspot[] = [
       { id: 'none', label: 'Leave it as is', sub: '', points: 0,
         delta: {}, outcome: 'Nothing changes.' },
     ],
+    reasons: [
+      { id: 'source', text: 'Stopping plastic at the source beats fishing it out of the river later' },
+      { id: 'ban', text: 'The bag ban already stops plastic, so nothing extra is needed' },
+      { id: 'cheaper', text: 'Cloth bags are cheaper than plastic for the vendors' },
+    ],
+    correctReason: 'source',
+    predict: { metric: 'plastic', question: 'How many kg of plastic will your choice keep off the ghats each day?', min: 0, max: 300, step: 5 },
   },
 ];
 
@@ -229,14 +289,30 @@ export function hotspotsFor(zone: ZoneId): Hotspot[] {
 /** Pure scoring. Throws ScoringError for anything malformed. */
 export function scoreAction(input: unknown): ActionResult {
   if (!input || typeof input !== 'object') throw new ScoringError('Send a hotspot action.');
-  const { hotspotId, choiceId, placements } = input as ActionInput;
+  const { hotspotId, choiceId, reasonId, prediction, placements } = input as ActionInput;
   const hotspot = typeof hotspotId === 'string' ? getHotspot(hotspotId) : undefined;
   if (!hotspot) throw new ScoringError('That hotspot does not exist.');
 
   if (hotspot.kind === 'choice') {
     const choice = hotspot.choices?.find((c) => c.id === choiceId);
     if (!choice) throw new ScoringError('Pick one of the listed options.');
-    return { hotspotId: hotspot.id, zone: hotspot.zone, choiceId: choice.id, points: choice.points, delta: { ...choice.delta }, outcome: choice.outcome };
+    if (!hotspot.reasons?.some((r) => r.id === reasonId)) throw new ScoringError('Pick a reason for your choice.');
+    const p = hotspot.predict!;
+    if (typeof prediction !== 'number' || !Number.isFinite(prediction) || prediction < p.min || prediction > p.max) {
+      throw new ScoringError('Make a prediction within the slider range.');
+    }
+    const reasonCorrect = reasonId === hotspot.correctReason;
+    const multiplier = reasonCorrect ? THINK_RULES.rightReason : THINK_RULES.wrongReason;
+    const actual = choice.delta[p.metric] ?? 0;
+    const tolerance = Math.max(THINK_RULES.predictTolerance * Math.abs(actual), THINK_RULES.predictFloor * (p.max - p.min));
+    const predictionHit = Math.abs(prediction - actual) <= tolerance;
+    const bonus = predictionHit ? THINK_RULES.predictBonus : 0;
+    return {
+      hotspotId: hotspot.id, zone: hotspot.zone, choiceId: choice.id,
+      points: Math.round(choice.points * multiplier) + bonus,
+      delta: { ...choice.delta }, outcome: choice.outcome,
+      basePoints: choice.points, reasonCorrect, multiplier, prediction, predictionActual: actual, predictionHit, bonus,
+    };
   }
 
   if (!placements || typeof placements !== 'object') throw new ScoringError('Sort every item into a bin first.');

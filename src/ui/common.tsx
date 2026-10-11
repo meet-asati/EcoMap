@@ -53,7 +53,7 @@ export function Modal({ labelledBy, onClose, children, wide = false }: { labelle
       aria-labelledby={labelledBy}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className={`px-frame grid max-h-[92vh] w-full gap-3 overflow-auto bg-panel p-[18px] ${wide ? 'max-w-[760px]' : 'max-w-[680px]'}`}>
+      <div className={`px-frame grid max-h-[92vh] w-full gap-3 overflow-auto bg-panel p-4.5 ${wide ? 'max-w-190' : 'max-w-170'}`}>
         {children}
       </div>
     </div>

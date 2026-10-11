@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, type Ref } from 'react';
 import { hotspotsFor, type Hotspot, type ZoneId } from '../../shared/hotspots';
 import { drawAvatar, drawMap } from './render';
 import { COLS, MAP_H, MAP_W, ROWS, SPAWN, isWalkable } from './maps';
@@ -8,6 +8,15 @@ interface Props {
   completed: Set<string>;
   paused: boolean;
   onOpen: (h: Hotspot) => void;
+  /** Fires when the avatar steps next to a hotspot, or away from one. */
+  onNear?: (h: Hotspot | null) => void;
+  ref?: Ref<MapControls>;
+}
+
+/** Imperative walking for on-screen controls. */
+export interface MapControls {
+  move: (dx: number, dy: number) => void;
+  interact: () => void;
 }
 
 const KEYS: Record<string, [number, number]> = {
@@ -26,16 +35,38 @@ function hotspotNear(hs: Hotspot[], x: number, y: number) {
   return hs.find((h) => x >= h.x - 1 && x <= h.x + h.w && y >= h.y - 1 && y <= h.y + h.h);
 }
 
-export function MapCanvas({ zone, completed, paused, onOpen }: Props) {
+export function MapCanvas({ zone, completed, paused, onOpen, onNear, ref }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const avatar = useRef({ ...SPAWN[zone] });
-  const live = useRef({ completed, paused, onOpen });
-  live.current = { completed, paused, onOpen };
+  const near = useRef<Hotspot | null>(null);
+  const live = useRef({ completed, paused, onOpen, onNear });
+  live.current = { completed, paused, onOpen, onNear };
   const hotspots = useMemo(() => hotspotsFor(zone), [zone]);
+
+  const updateNear = useCallback(() => {
+    const h = hotspotNear(hotspots, avatar.current.x, avatar.current.y) ?? null;
+    if (h !== near.current) { near.current = h; live.current.onNear?.(h); }
+  }, [hotspots]);
 
   useEffect(() => {
     avatar.current = { ...SPAWN[zone] };
-  }, [zone]);
+    updateNear();
+  }, [zone, updateNear]);
+
+  const move = useCallback((dx: number, dy: number) => {
+    if (live.current.paused) return;
+    const nx = avatar.current.x + dx, ny = avatar.current.y + dy;
+    if (isWalkable(zone, nx, ny)) { avatar.current = { x: nx, y: ny }; updateNear(); }
+  }, [zone, updateNear]);
+
+  const interact = useCallback(() => {
+    if (live.current.paused) return false;
+    const h = hotspotNear(hotspots, avatar.current.x, avatar.current.y);
+    if (h) live.current.onOpen(h);
+    return Boolean(h);
+  }, [hotspots]);
+
+  useImperativeHandle(ref, () => ({ move, interact }), [move, interact]);
 
   // Render loop
   useEffect(() => {
@@ -58,21 +89,19 @@ export function MapCanvas({ zone, completed, paused, onOpen }: Props) {
       const target = e.target as HTMLElement | null;
       if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
       const key = e.key.toLowerCase();
-      const move = KEYS[key];
-      if (move) {
+      const dir = KEYS[key];
+      if (dir) {
         e.preventDefault();
-        const nx = avatar.current.x + move[0], ny = avatar.current.y + move[1];
-        if (isWalkable(zone, nx, ny)) avatar.current = { x: nx, y: ny };
+        move(dir[0], dir[1]);
         return;
       }
       if (key === 'e' || (key === 'enter' && target?.tagName !== 'BUTTON')) {
-        const h = hotspotNear(hotspots, avatar.current.x, avatar.current.y);
-        if (h) { e.preventDefault(); live.current.onOpen(h); }
+        if (interact()) e.preventDefault();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [zone, hotspots]);
+  }, [move, interact]);
 
   const tileFromEvent = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const r = e.currentTarget.getBoundingClientRect();

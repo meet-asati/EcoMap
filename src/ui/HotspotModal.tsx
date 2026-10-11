@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { BINS, SORT_ITEMS, type ActionInput, type ActionResult, type BinId, type Hotspot, type MetricKey } from '../../shared/hotspots';
+import { useMemo, useState } from 'react';
+import { BINS, METRICS, SORT_ITEMS, type ActionInput, type ActionResult, type BinId, type Hotspot, type MetricKey } from '../../shared/hotspots';
 import { errorMessage } from '../api';
 import { Modal, fmt } from './common';
 
@@ -17,14 +17,45 @@ function deltaLabel(k: MetricKey, v: number): string {
   }
 }
 
-function Outcome({ result }: { result: ActionResult }) {
+function shuffle<T>(items: T[]): T[] {
+  const a = [...items];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function predictLabel(k: MetricKey, v: number): string {
+  return `${fmt(v)} ${METRICS[k].unit}`;
+}
+
+function Outcome({ hotspot, result }: { hotspot: Hotspot; result: ActionResult }) {
   const entries = Object.entries(result.delta).filter(([, v]) => v !== 0) as [MetricKey, number][];
+  const metric = hotspot.predict?.metric;
+  const rightReason = hotspot.reasons?.find((r) => r.id === hotspot.correctReason)?.text;
   return (
     <div className="grid gap-1.5 bg-[#0f1b12] p-3 shadow-[0_0_0_2px_var(--color-leafdk)]" role="status">
       <span className="font-display text-[16px] text-gold">
         {result.total !== undefined ? `${result.correct}/${result.total} correct · ` : ''}
         {result.points ? `+${fmt(result.points)} PTS` : 'NO POINTS'}
       </span>
+      {result.basePoints !== undefined && (
+        <span className="text-[16px] text-muted">
+          {fmt(result.basePoints)} base × {result.multiplier} ({result.reasonCorrect ? 'right reason' : 'wrong reason'})
+          {result.bonus ? ` + ${fmt(result.bonus)} prediction bonus` : ''} = {fmt(result.points)}
+        </span>
+      )}
+      {result.reasonCorrect !== undefined && (
+        <span className={result.reasonCorrect ? 'text-leaf' : 'text-warn'}>
+          {result.reasonCorrect ? '✓ Right reason: ' : '✗ The key reason: '}{rightReason}
+        </span>
+      )}
+      {metric && result.prediction !== undefined && result.predictionActual !== undefined && (
+        <span className={result.predictionHit ? 'text-leaf' : 'text-warn'}>
+          {result.predictionHit ? '✓' : '✗'} You guessed {predictLabel(metric, result.prediction)}. Actual: {predictLabel(metric, result.predictionActual)}.
+        </span>
+      )}
       <span>{result.outcome}</span>
       {entries.map(([k, v]) => (
         <span key={k} className={`animate-pop text-[16px] ${(k === 'co2' && v < 0) ? 'text-warn' : 'text-leaf'}`}>{deltaLabel(k, v)}</span>
@@ -56,7 +87,7 @@ function SortGame({ disabled, graded, onSubmit }: {
 
   return (
     <div className="grid gap-2.5">
-      <div className="flex min-h-[44px] flex-wrap gap-2" aria-label="Items to sort">
+      <div className="flex min-h-11 flex-wrap gap-2" aria-label="Items to sort">
         {pool.map((it) => (
           <button key={it.id} type="button" disabled={locked} aria-pressed={selected === it.id}
             className={`btn flex items-center gap-2 px-2.5 py-1.5 text-[18px] ${selected === it.id ? 'shadow-[0_0_0_2px_var(--color-gold)]' : ''}`}
@@ -74,7 +105,7 @@ function SortGame({ disabled, graded, onSubmit }: {
             aria-label={`Put selected item in ${b.title}`}
             onClick={() => place(b.id)}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); place(b.id); } }}
-            className={`grid min-h-[110px] content-start gap-1.5 bg-well p-2 ${selected ? 'cursor-pointer shadow-[inset_0_0_0_2px_var(--color-gold)]' : 'shadow-[inset_0_0_0_2px_var(--color-line)]'}`}>
+            className={`grid min-h-27.5 content-start gap-1.5 bg-well p-2 ${selected ? 'cursor-pointer shadow-[inset_0_0_0_2px_var(--color-gold)]' : 'shadow-[inset_0_0_0_2px_var(--color-line)]'}`}>
             <h3 className="label-caps">{b.title}</h3>
             <span className="text-[15px] text-muted">{b.route}</span>
             {SORT_ITEMS.filter((i) => placements[i.id] === b.id).map((it) => {
@@ -102,6 +133,81 @@ function SortGame({ disabled, graded, onSubmit }: {
   );
 }
 
+type Step = 'pick' | 'why' | 'predict';
+
+function ChoiceFlow({ hotspot, disabled, graded, onSubmit }: {
+  hotspot: Hotspot;
+  disabled: boolean;
+  graded: boolean;
+  onSubmit: (input: { choiceId: string; reasonId: string; prediction: number }) => void;
+}) {
+  const p = hotspot.predict!;
+  // Shuffled once per modal open so the position of an option says nothing about its score.
+  const choices = useMemo(() => shuffle(hotspot.choices!), [hotspot]);
+  const reasons = useMemo(() => shuffle(hotspot.reasons!), [hotspot]);
+  const [step, setStep] = useState<Step>('pick');
+  const [choiceId, setChoiceId] = useState<string | null>(null);
+  const [reasonId, setReasonId] = useState<string | null>(null);
+  const [prediction, setPrediction] = useState(() => Math.round((p.min + p.max) / 2 / p.step) * p.step);
+  const locked = disabled || graded;
+  const chosen = choices.find((c) => c.id === choiceId);
+
+  const option = (key: string, active: boolean, onClick: () => void, label: string, sub?: string) => (
+    <button key={key} type="button" disabled={locked} aria-pressed={active} onClick={onClick}
+      className={`btn grid gap-1 px-3 py-2.5 text-left ${active ? 'outline-3 outline-gold' : ''}`}>
+      <b className="text-[20px] font-normal">{label}</b>
+      {sub && <small className="text-[16px] text-muted">{sub}</small>}
+    </button>
+  );
+
+  return (
+    <div className="grid gap-2.5">
+      <span className="label-caps">
+        {step === 'pick' ? 'Step 1 of 3 · Choose an action' : step === 'why' ? 'Step 2 of 3 · Why is this the right call?' : 'Step 3 of 3 · Predict the impact'}
+      </span>
+
+      {step === 'pick' && (
+        <div className="grid gap-2">
+          {choices.map((c) => option(c.id, choiceId === c.id, () => setChoiceId(c.id), c.label, c.sub || undefined))}
+        </div>
+      )}
+
+      {step === 'why' && (
+        <div className="grid gap-2">
+          <span className="text-muted">You chose: {chosen?.label}</span>
+          {reasons.map((r) => option(r.id, reasonId === r.id, () => setReasonId(r.id), r.text))}
+        </div>
+      )}
+
+      {step === 'predict' && (
+        <div className="grid gap-2">
+          <label htmlFor={`predict-${hotspot.id}`}>{p.question}</label>
+          <span className="text-muted text-[16px]">Use the facts above. Within 25% earns a bonus.</span>
+          <input id={`predict-${hotspot.id}`} type="range" min={p.min} max={p.max} step={p.step} value={prediction}
+            disabled={locked} onChange={(e) => setPrediction(Number(e.target.value))} className="w-full accent-gold" />
+          <span className="font-display text-[12px] text-gold" aria-live="polite">{predictLabel(p.metric, prediction)}</span>
+        </div>
+      )}
+
+      {!graded && (
+        <div className="flex flex-wrap justify-end gap-2">
+          {step !== 'pick' && (
+            <button type="button" className="btn" disabled={disabled} onClick={() => setStep(step === 'predict' ? 'why' : 'pick')}>◀ Back</button>
+          )}
+          {step === 'pick' && <button type="button" className="btn btn-primary" disabled={!choiceId} onClick={() => setStep('why')}>Next ▶</button>}
+          {step === 'why' && <button type="button" className="btn btn-primary" disabled={!reasonId} onClick={() => setStep('predict')}>Next ▶</button>}
+          {step === 'predict' && (
+            <button type="button" className="btn btn-primary" disabled={disabled}
+              onClick={() => onSubmit({ choiceId: choiceId!, reasonId: reasonId!, prediction })}>
+              {disabled ? 'Saving…' : 'Submit'}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function HotspotModal({ hotspot, alreadyDone, onClose, onSubmit }: {
   hotspot: Hotspot;
   alreadyDone: boolean;
@@ -111,12 +217,11 @@ export function HotspotModal({ hotspot, alreadyDone, onClose, onSubmit }: {
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<ActionResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [picked, setPicked] = useState<string | null>(null);
 
   const submit = async (input: ActionInput) => {
     setSaving(true); setError(null);
     try { setResult(await onSubmit(input)); }
-    catch (e) { setError(errorMessage(e)); setPicked(null); }
+    catch (e) { setError(errorMessage(e)); }
     finally { setSaving(false); }
   };
 
@@ -138,22 +243,11 @@ export function HotspotModal({ hotspot, alreadyDone, onClose, onSubmit }: {
       ) : hotspot.kind === 'sort' ? (
         <SortGame disabled={saving} graded={Boolean(result)} onSubmit={(placements) => submit({ hotspotId: hotspot.id, placements })} />
       ) : (
-        <div className="grid gap-2">
-          {hotspot.choices!.map((c) => (
-            <button key={c.id} type="button" disabled={saving || Boolean(result)}
-              className={`btn grid grid-cols-[1fr_auto] gap-x-2.5 gap-y-1 px-3 py-2.5 text-left ${c.sustainable ? 'shadow-[0_0_0_2px_var(--color-leafdk),inset_0_-3px_0_#0007]' : ''} ${picked === c.id ? 'outline-3 outline-gold' : ''}`}
-              onClick={() => { setPicked(c.id); submit({ hotspotId: hotspot.id, choiceId: c.id }); }}>
-              <b className="col-start-1 row-start-1 text-[20px] font-normal">{c.label}</b>
-              {c.sub && <small className="col-start-1 row-start-2 text-[16px] text-muted">{c.sub}</small>}
-              <span className="col-start-2 row-span-2 row-start-1 self-center whitespace-nowrap font-display text-[10px] text-gold">
-                {saving && picked === c.id ? 'Saving…' : `${c.points ? '+' + fmt(c.points) : '0'} pts`}
-              </span>
-            </button>
-          ))}
-        </div>
+        <ChoiceFlow hotspot={hotspot} disabled={saving} graded={Boolean(result)}
+          onSubmit={(input) => submit({ hotspotId: hotspot.id, ...input })} />
       )}
 
-      {result && <Outcome result={result} />}
+      {result && <Outcome hotspot={hotspot} result={result} />}
       {error && <p className="m-0 text-bad" role="alert">{error}</p>}
 
       <div className="flex flex-wrap justify-end gap-2">
