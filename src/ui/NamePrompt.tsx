@@ -7,7 +7,7 @@ export function NamePrompt({ suggestion, onSave }: { suggestion: string; onSave:
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   return (
-    <div className="mx-auto mt-8 grid max-w-[420px] gap-5">
+    <div className="mx-auto mt-8 grid max-w-105 gap-5">
       <div className="flex justify-center"><Logo size="lg" /></div>
       <form
         className="px-frame grid gap-3.5 bg-panel p-3.5"

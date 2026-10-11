@@ -21,11 +21,11 @@ export function ZoneSelect({ profile, onPick }: { profile: Profile; onPick: (z: 
   const completed = new Set(Object.keys(profile.completed));
   return (
     <section>
-      <div className="mx-auto mb-6 mt-2 max-w-[720px] text-center">
+      <div className="mx-auto mb-6 mt-2 max-w-180 text-center">
         <h2 className="text-[13px]">Choose a zone</h2>
         <p className="mt-2.5 text-muted">Each zone is a real Pune micro-environment with live hotspots. Your progress is saved to your profile.</p>
       </div>
-      <div className="mx-auto grid max-w-[900px] gap-[18px] sm:grid-cols-2">
+      <div className="mx-auto grid max-w-225 gap-4.5 sm:grid-cols-2">
         {(Object.keys(ZONES) as ZoneId[]).map((z) => {
           const hs = hotspotsFor(z);
           const done = hs.filter((h) => completed.has(h.id)).length;

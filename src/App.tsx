@@ -56,12 +56,12 @@ export default function App() {
   );
 
   return (
-    <main className="mx-auto max-w-[1440px] px-4 py-3">
+    <main className="mx-auto max-w-360 px-4 py-3">
       {top}
       {screen === 'boot' && <div className="mt-24"><Spinner label="Loading EcoMap…" /></div>}
       {screen === 'auth' && <AuthScreen onSignedIn={loadProfile} />}
       {screen === 'loadFailed' && (
-        <div className="mx-auto mt-24 grid max-w-[420px] gap-3 text-center">
+        <div className="mx-auto mt-24 grid max-w-105 gap-3 text-center">
           <p>EcoMap could not load your profile.</p>
           <div className="flex justify-center gap-2">
             <button type="button" className="btn btn-primary" onClick={loadProfile}>Try again</button>

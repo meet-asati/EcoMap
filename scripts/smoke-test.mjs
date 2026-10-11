@@ -20,10 +20,23 @@ const API = outputs.custom.api.endpoint.replace(/\/+$/, '');
 const poolId = outputs.auth.user_pool_id;
 const cognito = new CognitoIdentityProviderClient({});
 
-const email = `smoke-${Date.now()}@example.com`;
+const stamp = Date.now();
+const email = `smoke-${stamp}@example.com`;
+const rivalEmail = `smoke-rival-${stamp}@example.com`;
 const password = `Smoke!${Math.random().toString(36).slice(2, 10)}A1`;
+const name = `Smoke${stamp % 1e6}`;
 let token;
-let userSub;
+const subs = [];
+
+async function createUser(address) {
+  await cognito.send(new AdminCreateUserCommand({
+    UserPoolId: poolId, Username: address, MessageAction: 'SUPPRESS',
+    UserAttributes: [{ Name: 'email', Value: address }, { Name: 'email_verified', Value: 'true' }],
+  }));
+  await cognito.send(new AdminSetUserPasswordCommand({ UserPoolId: poolId, Username: address, Password: password, Permanent: true }));
+  const u = await cognito.send(new AdminGetUserCommand({ UserPoolId: poolId, Username: address }));
+  subs.push(u.UserAttributes.find((a) => a.Name === 'sub').Value);
+}
 
 async function call(method, path, body, auth = true) {
   const res = await fetch(API + path, {
@@ -42,13 +55,7 @@ const step = async (name, fn) => {
 };
 
 try {
-  await cognito.send(new AdminCreateUserCommand({
-    UserPoolId: poolId, Username: email, MessageAction: 'SUPPRESS',
-    UserAttributes: [{ Name: 'email', Value: email }, { Name: 'email_verified', Value: 'true' }],
-  }));
-  await cognito.send(new AdminSetUserPasswordCommand({ UserPoolId: poolId, Username: email, Password: password, Permanent: true }));
-  const u = await cognito.send(new AdminGetUserCommand({ UserPoolId: poolId, Username: email }));
-  userSub = u.UserAttributes.find((a) => a.Name === 'sub').Value;
+  await createUser(email);
 
   await step('sign in through Cognito (SRP)', async () => {
     const r = await signIn({ username: email, password });
@@ -75,26 +82,40 @@ try {
   });
 
   await step('PUT /me sets the display name', async () => {
-    const r = await call('PUT', '/me', { displayName: 'SmokeTest' });
+    const r = await call('PUT', '/me', { displayName: name });
     assert.equal(r.status, 200);
-    assert.equal(r.data.displayName, 'SmokeTest');
+    assert.equal(r.data.displayName, name);
+  });
+
+  await step('PUT /me lets a player re-save their own name', async () => {
+    const r = await call('PUT', '/me', { displayName: name.toUpperCase() });
+    assert.equal(r.status, 200);
+    assert.equal(r.data.displayName, name.toUpperCase());
   });
 
   await step('POST /actions scores a choice on the server', async () => {
-    const r = await call('POST', '/actions', { hotspotId: 'solar-eng', choiceId: 'full', points: 999999 });
+    const r = await call('POST', '/actions', { hotspotId: 'solar-eng', choiceId: 'full', reasonId: 'grid', prediction: 116000, points: 999999 });
     assert.equal(r.status, 200);
-    assert.equal(r.data.result.points, 1160);
-    assert.equal(r.data.profile.totalScore, 1160);
+    // 1,160 base x 1.5 for the right reason + 200 prediction bonus
+    assert.equal(r.data.result.points, 1940);
+    assert.equal(r.data.result.reasonCorrect, true);
+    assert.equal(r.data.result.predictionHit, true);
+    assert.equal(r.data.profile.totalScore, 1940);
     assert.equal(r.data.profile.metrics.kwh, 162000);
   });
 
   await step('the same hotspot cannot be scored twice', async () => {
-    const r = await call('POST', '/actions', { hotspotId: 'solar-eng', choiceId: 'full' });
+    const r = await call('POST', '/actions', { hotspotId: 'solar-eng', choiceId: 'full', reasonId: 'grid', prediction: 116000 });
     assert.equal(r.status, 409);
   });
 
   await step('an invalid choice is rejected', async () => {
-    const r = await call('POST', '/actions', { hotspotId: 'ewaste-lab', choiceId: 'nope' });
+    const r = await call('POST', '/actions', { hotspotId: 'ewaste-lab', choiceId: 'nope', reasonId: 'leach', prediction: 60 });
+    assert.equal(r.status, 400);
+  });
+
+  await step('a choice without a reason or prediction is rejected', async () => {
+    const r = await call('POST', '/actions', { hotspotId: 'ewaste-lab', choiceId: 'authorised' });
     assert.equal(r.status, 400);
   });
 
@@ -104,7 +125,7 @@ try {
     const r = await call('POST', '/actions', { hotspotId: 'nirmalya-ghat', placements });
     assert.equal(r.status, 200);
     assert.equal(r.data.result.correct, 8);
-    assert.equal(r.data.profile.totalScore, 2360);
+    assert.equal(r.data.profile.totalScore, 3140);
   });
 
   await step('leaderboard query returns this player', async () => {
@@ -112,7 +133,7 @@ try {
     assert.equal(r.status, 200);
     const me = r.data.entries.find((e) => e.isMe);
     assert.ok(me, 'player not in top 10');
-    assert.equal(me.totalScore, 2360);
+    assert.equal(me.totalScore, 3140);
     for (let i = 1; i < r.data.entries.length; i++) assert.ok(r.data.entries[i - 1].totalScore >= r.data.entries[i].totalScore, 'not sorted');
   });
 
@@ -122,14 +143,29 @@ try {
     assert.equal(r.data.totalScore, 0);
     assert.deepEqual(r.data.completed, {});
   });
+
+  await step('another player cannot take a name in use', async () => {
+    await signOut();
+    await createUser(rivalEmail);
+    await signIn({ username: rivalEmail, password });
+    token = (await fetchAuthSession()).tokens.idToken.toString();
+    const r = await call('PUT', '/me', { displayName: name.toLowerCase() });
+    assert.equal(r.status, 409);
+    assert.equal(r.data.code, 'UsernameExistsException');
+  });
 } finally {
   await signOut().catch(() => {});
-  await cognito.send(new AdminDeleteUserCommand({ UserPoolId: poolId, Username: email })).catch((e) => console.error('user cleanup failed', e.message));
-  if (userSub) {
-    const ddb = new DynamoDBClient({});
-    const tables = (await ddb.send(new ListTablesCommand({}))).TableNames.filter((t) => t.includes('ecomap') && t.includes('PlayersTable'));
-    for (const t of tables) await DynamoDBDocumentClient.from(ddb).send(new DeleteCommand({ TableName: t, Key: { userId: userSub } }));
-    console.log(`Cleaned up test user and row in ${tables.length} table(s)`);
+  for (const address of [email, rivalEmail]) {
+    await cognito.send(new AdminDeleteUserCommand({ UserPoolId: poolId, Username: address })).catch((e) => {
+      if (e.name !== 'UserNotFoundException') console.error('user cleanup failed', e.message);
+    });
   }
+  const ddb = new DynamoDBClient({});
+  const doc = DynamoDBDocumentClient.from(ddb);
+  const all = (await ddb.send(new ListTablesCommand({}))).TableNames.filter((t) => t.includes('ecomap'));
+  const players = all.filter((t) => t.includes('PlayersTable'));
+  for (const t of players) for (const userId of subs) await doc.send(new DeleteCommand({ TableName: t, Key: { userId } }));
+  for (const t of all.filter((t) => t.includes('NamesTable'))) await doc.send(new DeleteCommand({ TableName: t, Key: { nameKey: name.toLowerCase() } }));
+  console.log(`Cleaned up ${subs.length} test user(s), their rows and the reserved name`);
   for (const [s, n] of steps) console.log(`${s}  ${n}`);
 }

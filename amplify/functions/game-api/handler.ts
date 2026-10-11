@@ -1,9 +1,10 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, TransactWriteCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { ScoringError, scoreAction, type MetricKey } from '../../../shared/hotspots';
 
 const TABLE = process.env.TABLE_NAME ?? '';
+const NAMES_TABLE = process.env.NAMES_TABLE_NAME ?? '';
 const LEADERBOARD_INDEX = 'LeaderboardIndex';
 const LEADERBOARD_ID = 'GLOBAL';
 const NAME_PATTERN = /^[A-Za-z0-9_.\- ]{2,20}$/;
@@ -12,7 +13,7 @@ const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
   marshallOptions: { removeUndefinedValues: true },
 });
 
-interface CompletedRecord { choiceId?: string; points: number; correct?: number; at: string }
+interface CompletedRecord { choiceId?: string; points: number; correct?: number; reasonCorrect?: boolean; predictionHit?: boolean; at: string }
 interface Player {
   userId: string;
   displayName?: string;
@@ -83,16 +84,51 @@ async function setDisplayName(userId: string, body: Record<string, unknown>) {
   if (!NAME_PATTERN.test(name)) {
     return json(400, { message: 'Use 2 to 20 letters, numbers, spaces, dots, dashes or underscores.' });
   }
-  await ensurePlayer(userId);
-  // Setting leaderboardId here makes the GSI sparse: only named players appear on the board.
-  const res = await ddb.send(new UpdateCommand({
-    TableName: TABLE,
-    Key: { userId },
-    UpdateExpression: 'SET displayName = :n, leaderboardId = :g, updatedAt = :now',
-    ExpressionAttributeValues: { ':n': name, ':g': LEADERBOARD_ID, ':now': new Date().toISOString() },
-    ReturnValues: 'ALL_NEW',
-  }));
-  return json(200, publicProfile(res.Attributes as Player));
+  const player = await ensurePlayer(userId);
+  const nameKey = name.toLowerCase();
+  const oldKey = player.displayName?.toLowerCase();
+  const mine = { ':u': userId };
+
+  // One transaction: claim the new name, rename the player, release the old name.
+  // The claim fails if another player already holds the name (case-insensitive).
+  try {
+    await ddb.send(new TransactWriteCommand({
+      TransactItems: [
+        {
+          Put: {
+            TableName: NAMES_TABLE,
+            Item: { nameKey, userId },
+            ConditionExpression: 'attribute_not_exists(nameKey) OR userId = :u',
+            ExpressionAttributeValues: mine,
+          },
+        },
+        {
+          // Setting leaderboardId here makes the GSI sparse: only named players appear on the board.
+          Update: {
+            TableName: TABLE,
+            Key: { userId },
+            UpdateExpression: 'SET displayName = :n, leaderboardId = :g, updatedAt = :now',
+            ExpressionAttributeValues: { ':n': name, ':g': LEADERBOARD_ID, ':now': new Date().toISOString() },
+          },
+        },
+        ...(oldKey && oldKey !== nameKey ? [{
+          Delete: {
+            TableName: NAMES_TABLE,
+            Key: { nameKey: oldKey },
+            ConditionExpression: 'attribute_not_exists(nameKey) OR userId = :u',
+            ExpressionAttributeValues: mine,
+          },
+        }] : []),
+      ],
+    }));
+  } catch (e) {
+    const reasons = (e as { CancellationReasons?: { Code?: string }[] })?.CancellationReasons;
+    if (reasons?.[0]?.Code === 'ConditionalCheckFailed') {
+      return json(409, { code: 'UsernameExistsException', message: `The name "${name}" is taken. Pick another one.` });
+    }
+    throw e;
+  }
+  return json(200, publicProfile((await getPlayer(userId))!));
 }
 
 async function submitAction(userId: string, body: Record<string, unknown>) {
@@ -105,7 +141,7 @@ async function submitAction(userId: string, body: Record<string, unknown>) {
     ':pts': result.points,
     ':now': new Date().toISOString(),
     ':zero': 0,
-    ':rec': { choiceId: result.choiceId, points: result.points, correct: result.correct, at: new Date().toISOString() },
+    ':rec': { choiceId: result.choiceId, points: result.points, correct: result.correct, reasonCorrect: result.reasonCorrect, predictionHit: result.predictionHit, at: new Date().toISOString() },
   };
   const sets = ['totalScore = if_not_exists(totalScore, :zero) + :pts', 'completed.#h = :rec', 'updatedAt = :now'];
   Object.entries(result.delta).forEach(([key, amount], i) => {

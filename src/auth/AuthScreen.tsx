@@ -137,12 +137,12 @@ export function AuthScreen({ onSignedIn }: { onSignedIn: () => void }) {
 
   return (
     <div className="pb-8">
-      <div className="mx-auto mb-6 mt-6 max-w-[720px] text-center">
+      <div className="mx-auto mb-6 mt-6 max-w-180 text-center">
         <div className="flex justify-center"><Logo size="lg" /></div>
         <p className="mt-2.5 text-muted">Two real places in Pune. Small choices. See exactly what they add up to.</p>
       </div>
 
-      <form className="px-frame mx-auto grid max-w-[420px] gap-3.5 bg-panel p-3.5" onSubmit={handler[mode]} noValidate={false}>
+      <form className="px-frame mx-auto grid max-w-105 gap-3.5 bg-panel p-3.5" onSubmit={handler[mode]} noValidate={false}>
         {(mode === 'signIn' || mode === 'signUp') && (
           <div className="flex gap-1.5" role="tablist" aria-label="Account">
             {(['signIn', 'signUp'] as const).map((m) => (

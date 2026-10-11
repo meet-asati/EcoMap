@@ -69,8 +69,20 @@ try {
 
   await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.innerText.startsWith('Engineering Block roof')).click());
   await page.waitForSelector('[role=dialog]');
-  await page.evaluate(() => [...document.querySelectorAll('[role=dialog] button')].find((b) => b.innerText.includes('Install on the full usable roof')).click());
-  await page.waitForFunction(() => document.body.innerText.includes('+1,160 PTS'), { timeout: 20000 });
+  const clickIn = (label) => page.evaluate((l) => [...document.querySelectorAll('[role=dialog] button')].find((b) => b.innerText.includes(l)).click(), label);
+  check(!/pts/i.test(await page.$eval('[role=dialog]', (d) => d.innerText)), 'choice points are hidden before picking');
+  await clickIn('Install on the full usable roof');
+  await clickIn('Next');
+  await clickIn('Pune sun is strong enough');
+  await clickIn('Next');
+  await page.evaluate(() => {
+    const input = document.querySelector('[role=dialog] input[type=range]');
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, '116000');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await clickIn('Submit');
+  // 1,160 base x 1.5 for the right reason + 200 prediction bonus
+  await page.waitForFunction(() => document.body.innerText.includes('+1,940 PTS'), { timeout: 20000 });
   await new Promise((r) => setTimeout(r, 900));
   await shot('live-05-solar-result.png');
   const t = await text();
@@ -78,7 +90,7 @@ try {
   check(t.includes('1,62,000'), 'HUD solar offset shows 1,62,000 kWh');
 
   await page.evaluate(() => [...document.querySelectorAll('[role=dialog] button')].find((b) => b.innerText.includes('Back to map')).click());
-  await page.waitForFunction(() => /UI_Check \(you\)\s*1,160/.test(document.body.innerText), { timeout: 20000 });
+  await page.waitForFunction(() => /UI_Check \(you\)\s*1,940/.test(document.body.innerText), { timeout: 20000 });
   check(true, 'leaderboard shows the new score');
   await shot('live-06-after.png');
 

@@ -18,7 +18,7 @@ const gameLambda = backend.gameApi.resources.lambda;
 
 // ---------- DynamoDB ----------
 // Lives in the function's stack so granting access does not create a cross-stack cycle.
-const playersTable = new Table(Stack.of(gameLambda), 'PlayersTable', {
+const playersTable = new Table(Stack.of(gameLambda), 'PlayersTableV2', {
   partitionKey: { name: 'userId', type: AttributeType.STRING },
   billingMode: BillingMode.PAY_PER_REQUEST,
   removalPolicy: RemovalPolicy.DESTROY,
@@ -33,8 +33,17 @@ playersTable.addGlobalSecondaryIndex({
   nonKeyAttributes: ['displayName'],
 });
 
+// Display-name reservations: one row per lowercased name, so two players cannot share a name.
+const namesTable = new Table(Stack.of(gameLambda), 'NamesTable', {
+  partitionKey: { name: 'nameKey', type: AttributeType.STRING },
+  billingMode: BillingMode.PAY_PER_REQUEST,
+  removalPolicy: RemovalPolicy.DESTROY,
+});
+
 playersTable.grantReadWriteData(gameLambda);
+namesTable.grantReadWriteData(gameLambda);
 backend.gameApi.addEnvironment('TABLE_NAME', playersTable.tableName);
+backend.gameApi.addEnvironment('NAMES_TABLE_NAME', namesTable.tableName);
 
 // ---------- API Gateway (REST) ----------
 const apiStack = backend.createStack('api-stack');
